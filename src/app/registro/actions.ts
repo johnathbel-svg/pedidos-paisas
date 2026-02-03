@@ -4,10 +4,9 @@ import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 
 export async function registerClient(formData: FormData) {
-    // TEMPORARY: Using Service Role to bypass persistent schema cache issues
-    // TODO: Revert to anon key once PostgREST cache is resolved
+    // Using anon key with RLS disabled on clients table
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const firstName = formData.get("firstName") as string;
