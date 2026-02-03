@@ -29,8 +29,7 @@ export async function registerClient(formData: FormData) {
             phone: phone,
             document_id: documentId || null,
             address: address?.toUpperCase() || null,
-            email: null, // Not asking for email to reduce friction
-            notes: 'Registro via QR Tienda'
+            email: null // Not asking for email to reduce friction
         });
 
     if (error) {
