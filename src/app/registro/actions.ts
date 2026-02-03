@@ -28,8 +28,8 @@ export async function registerClient(formData: FormData) {
         p_address: address || null
     };
 
-    // Call the RPC function
-    const { data, error } = await supabase.rpc('register_new_client', rpcParams);
+    // Call the RPC function (V2)
+    const { data, error } = await supabase.rpc('register_client_v2', rpcParams);
 
     if (error) {
         console.error("RPC Error:", error);
