@@ -1,10 +1,13 @@
 'use server';
 
-import { createClient } from "@/utils/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 
 export async function registerClient(formData: FormData) {
-    const supabase = await createClient();
+    // DIRECT CLIENT INITIALIZATION (Bypassing SSR helper to ensure connection)
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
     const firstName = formData.get("firstName") as string;
     const lastName = formData.get("lastName") as string;
@@ -29,13 +32,12 @@ export async function registerClient(formData: FormData) {
             phone: phone,
             document_id: documentId || null,
             address: address?.toUpperCase() || null,
-            email: null // Not asking for email to reduce friction
+            // email removed
         });
 
     if (error) {
         console.error("Error registering client:", error);
-        // Expose the actual error message for debugging
-        return { success: false, message: `Error: ${error.message || error.details || "Desconocido"}` };
+        return { success: false, message: `Error (${new Date().toLocaleTimeString()}): ${error.message}` };
     }
 
     return { success: true, message: "¡Registro exitoso!" };
