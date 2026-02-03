@@ -4,9 +4,10 @@ import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 
 export async function registerClient(formData: FormData) {
-    // DIRECT CLIENT INITIALIZATION (Bypassing SSR helper to ensure connection)
+    // TEMPORARY: Using Service Role to bypass persistent schema cache issues
+    // TODO: Revert to anon key once PostgREST cache is resolved
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const firstName = formData.get("firstName") as string;
@@ -19,26 +20,24 @@ export async function registerClient(formData: FormData) {
         return { success: false, message: "Nombre, apellido y teléfono son obligatorios." };
     }
 
-    // Prepare parameters for RPC
-    const rpcParams = {
-        p_first_name: firstName,
-        p_last_name: lastName,
-        p_phone: phone,
-        p_document_id: documentId || null,
-        p_address: address || null
-    };
+    // Auto-generate full_name
+    const fullName = `${firstName} ${lastName}`.trim().toUpperCase();
 
-    // Call the RPC function (V2)
-    const { data, error } = await supabase.rpc('register_client_v2', rpcParams);
+    // Direct insert (bypassing RPC due to cache issues)
+    const { error } = await supabase
+        .from('clients')
+        .insert({
+            first_name: firstName.toUpperCase(),
+            last_name: lastName.toUpperCase(),
+            full_name: fullName,
+            phone: phone,
+            document_id: documentId || null,
+            address: address?.toUpperCase() || null,
+        });
 
     if (error) {
-        console.error("RPC Error:", error);
-        return { success: false, message: `System Error: ${error.message}` };
-    }
-
-    // Handle application-level errors from the function
-    if (data && data.success === false) {
-        return { success: false, message: data.message };
+        console.error("Error registering client:", error);
+        return { success: false, message: `Error: ${error.message}` };
     }
 
     return { success: true, message: "¡Registro exitoso!" };
