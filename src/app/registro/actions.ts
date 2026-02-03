@@ -19,25 +19,26 @@ export async function registerClient(formData: FormData) {
         return { success: false, message: "Nombre, apellido y teléfono son obligatorios." };
     }
 
-    // Auto-generate full_name
-    const fullName = `${firstName} ${lastName}`.trim().toUpperCase();
+    // Prepare parameters for RPC
+    const rpcParams = {
+        p_first_name: firstName,
+        p_last_name: lastName,
+        p_phone: phone,
+        p_document_id: documentId || null,
+        p_address: address || null
+    };
 
-    // Insert into clients
-    const { error } = await supabase
-        .from('clients')
-        .insert({
-            first_name: firstName.toUpperCase(),
-            last_name: lastName.toUpperCase(),
-            full_name: fullName,
-            phone: phone,
-            document_id: documentId || null,
-            address: address?.toUpperCase() || null,
-            // email removed
-        });
+    // Call the RPC function
+    const { data, error } = await supabase.rpc('register_new_client', rpcParams);
 
     if (error) {
-        console.error("Error registering client:", error);
-        return { success: false, message: `Error (${new Date().toLocaleTimeString()}): ${error.message}` };
+        console.error("RPC Error:", error);
+        return { success: false, message: `System Error: ${error.message}` };
+    }
+
+    // Handle application-level errors from the function
+    if (data && data.success === false) {
+        return { success: false, message: data.message };
     }
 
     return { success: true, message: "¡Registro exitoso!" };
