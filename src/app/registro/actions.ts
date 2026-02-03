@@ -35,7 +35,8 @@ export async function registerClient(formData: FormData) {
 
     if (error) {
         console.error("Error registering client:", error);
-        return { success: false, message: "Error al registrar. Verifica si ya estás registrado." };
+        // Expose the actual error message for debugging
+        return { success: false, message: `Error: ${error.message || error.details || "Desconocido"}` };
     }
 
     return { success: true, message: "¡Registro exitoso!" };
