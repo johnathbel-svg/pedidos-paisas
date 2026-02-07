@@ -12,6 +12,7 @@ export interface Order {
     public_id: string; // The readable ID e.g. PED-001
     status: 'TOMADO' | 'DESPACHO' | 'ENTREGADO' | 'PAGADO';
     client_name: string;
+    client_id?: string; // NEW: Foreign key to clients table for CRM tracking
     total_value: number;
     observations?: string;
     created_at: string;
@@ -19,6 +20,7 @@ export interface Order {
     invoices_data?: any[]; // flexible json
     driver_id?: string;
     delivery_drivers?: DeliveryDriver; // For joined queries (singular name because of foreign key relationship usually returns single object)
+    clients?: Client; // NEW: For joined queries with client data
 }
 
 export interface Client {

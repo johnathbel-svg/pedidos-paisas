@@ -3,7 +3,7 @@
 import * as React from "react";
 import { supabase } from "@/lib/supabase";
 import { Order, DeliveryDriver } from "@/types/order";
-import { Clock, CheckCircle2, Truck, DollarSign, Plus, MapPin, Store, Receipt, Users, User } from "lucide-react";
+import { Clock, CheckCircle2, Truck, DollarSign, Plus, MapPin, Store, Receipt, Users, User, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -11,6 +11,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { DriversManagementModal } from "@/components/DriversManagementModal";
 import { DateFilter } from "@/components/ui/DateFilter";
 import { DriverSelector } from "@/components/ui/DriverSelector";
+import { CRMIcon } from "@/components/icons/CRMIcon";
+
 
 
 export default function DashboardPage() {
@@ -158,6 +160,18 @@ export default function DashboardPage() {
                             </div>
                         </div>
                         <div className="flex gap-2">
+                            <Link
+                                href="/crm"
+                                className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-4 shadow-sm"
+                            >
+                                <CRMIcon className="mr-2 h-4 w-4" /> CRM
+                            </Link>
+                            <Link
+                                href="/analytics"
+                                className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-4 shadow-sm"
+                            >
+                                <BarChart3 className="mr-2 h-4 w-4" /> Analytics
+                            </Link>
                             <button
                                 onClick={() => setIsDriversModalOpen(true)}
                                 className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-4 shadow-sm"
