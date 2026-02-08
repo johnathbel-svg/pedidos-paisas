@@ -18,6 +18,7 @@ export interface Order {
     created_at: string;
     delivery_type?: 'DOMICILIO' | 'TIENDA';
     invoices_data?: any[]; // flexible json
+    products?: any[]; // JSONB array of products
     driver_id?: string;
     delivery_drivers?: DeliveryDriver; // For joined queries (singular name because of foreign key relationship usually returns single object)
     clients?: Client; // NEW: For joined queries with client data

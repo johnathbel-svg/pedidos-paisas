@@ -1,0 +1,6 @@
+@echo off
+echo Generando simulacion de impresion...
+node scripts/simulate-print.js
+echo.
+echo Presiona cualquier tecla para cerrar...
+pause >nul

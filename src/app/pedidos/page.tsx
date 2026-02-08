@@ -3,7 +3,7 @@
 import * as React from "react";
 import { supabase } from "@/lib/supabase";
 import { Order, DeliveryDriver } from "@/types/order";
-import { Clock, CheckCircle2, Truck, DollarSign, Plus, MapPin, Store, Receipt, Users, User, BarChart3 } from "lucide-react";
+import { Clock, CheckCircle2, Truck, DollarSign, Plus, MapPin, Store, Receipt, Users, User, BarChart3, ShoppingBag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -12,6 +12,9 @@ import { DriversManagementModal } from "@/components/DriversManagementModal";
 import { DateFilter } from "@/components/ui/DateFilter";
 import { DriverSelector } from "@/components/ui/DriverSelector";
 import { CRMIcon } from "@/components/icons/CRMIcon";
+import { InvoiceCaptureModal, InvoiceEvent } from "@/components/orders/InvoiceCaptureModal";
+import { processInvoiceEvent, ignoreInvoiceEvent } from "@/app/actions/invoices";
+import { toast } from "sonner";
 
 
 
@@ -21,6 +24,9 @@ export default function DashboardPage() {
     const [selectedDate, setSelectedDate] = React.useState<string>(new Date().toISOString().split('T')[0]);
     const [isDriversModalOpen, setIsDriversModalOpen] = React.useState(false);
     const [activeDrivers, setActiveDrivers] = React.useState<DeliveryDriver[]>([]);
+    const [invoiceEvent, setInvoiceEvent] = React.useState<InvoiceEvent | null>(null);
+    const [isInvoiceModalOpen, setIsInvoiceModalOpen] = React.useState(false);
+    const [expandedOrderId, setExpandedOrderId] = React.useState<string | null>(null);
     const router = useRouter();
 
     const fetchOrders = async () => {
@@ -67,9 +73,29 @@ export default function DashboardPage() {
         }
     }, [isDriversModalOpen]);
 
-    // Initial fetch of drivers
+    // Initial fetch of drivers and pending invoices
     React.useEffect(() => {
         fetchDrivers();
+
+        // Check for any pending invoices that might have been missed
+        const checkPendingInvoices = async () => {
+            const { data } = await supabase
+                .from('invoice_events')
+                .select('*')
+                .eq('status', 'PENDING')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single();
+
+            if (data) {
+                console.log("Found pending invoice on load:", data);
+                setInvoiceEvent(data as InvoiceEvent);
+                setIsInvoiceModalOpen(true);
+                toast.info("Factura pendiente detectada.");
+            }
+        };
+
+        checkPendingInvoices();
     }, []);
 
     React.useEffect(() => {
@@ -92,8 +118,24 @@ export default function DashboardPage() {
             })
             .subscribe();
 
+        // New Subscription for Invoice Events
+        const invoiceChannel = supabase
+            .channel('invoice-capture')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'invoice_events', filter: 'status=eq.PENDING' }, (payload) => {
+                console.log('🖨️ New Invoice Event Detected:', payload.new);
+                const newEvent = payload.new as InvoiceEvent;
+                setInvoiceEvent(newEvent);
+                setIsInvoiceModalOpen(true);
+                // Optional: Play sound here
+                const audio = new Audio('/sounds/notification.mp3'); // Ensure this file exists or use a robust solution
+                audio.play().catch(e => console.log('Audio play failed', e));
+                toast.info("Nueva factura detectada!");
+            })
+            .subscribe();
+
         return () => {
             supabase.removeChannel(channel);
+            supabase.removeChannel(invoiceChannel);
         };
     }, [selectedDate]);
 
@@ -132,13 +174,36 @@ export default function DashboardPage() {
             .reduce((sum, order) => sum + (Number(order.total_value) || 0), 0)
     };
 
+    const handleInvoiceAccept = (event: InvoiceEvent) => {
+        setIsInvoiceModalOpen(false);
+        toast.info("Redirigiendo a nuevo pedido...");
+        router.push(`/nuevo-pedido?eventId=${event.id}`);
+    };
+
+    const handleInvoiceIgnore = async (id: string) => {
+        setIsInvoiceModalOpen(false);
+        await ignoreInvoiceEvent(id);
+        setInvoiceEvent(null);
+        toast.dismiss();
+    };
+
     if (loading && orders.length === 0) return <div className="p-8 flex justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand"></div></div>;
 
     return (
         <div className="min-h-screen flex flex-col bg-background">
-            <DriversManagementModal
-                isOpen={isDriversModalOpen}
-                onClose={() => setIsDriversModalOpen(false)}
+            {isDriversModalOpen && (
+                <DriversManagementModal
+                    isOpen={isDriversModalOpen}
+                    onClose={() => setIsDriversModalOpen(false)}
+                />
+            )}
+
+            <InvoiceCaptureModal
+                isOpen={isInvoiceModalOpen}
+                data={invoiceEvent}
+                onClose={() => setIsInvoiceModalOpen(false)}
+                onAccept={handleInvoiceAccept}
+                onIgnore={handleInvoiceIgnore}
             />
 
             {/* Sticky Header Section */}
@@ -227,8 +292,9 @@ export default function DashboardPage() {
                                     exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.3 } }}
                                     transition={{ duration: 0.8, type: "spring", bounce: 0.3 }} // Slower animation
                                     className={cn(
-                                        "group relative rounded-xl border bg-card shadow-sm transition-all duration-300 hover:shadow-md hover:border-brand/50 hover:bg-accent/5"
+                                        "group relative rounded-xl border bg-card shadow-sm transition-all duration-300 hover:shadow-md hover:border-brand/50 hover:bg-accent/5 cursor-pointer"
                                     )}
+                                    onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
                                 >
                                     <div className="grid grid-cols-1 md:grid-cols-12 gap-0">
 
@@ -284,7 +350,7 @@ export default function DashboardPage() {
                                         </div>
 
                                         {/* Right Action Area */}
-                                        <div className="col-span-12 md:col-span-3 bg-muted/10 border-t md:border-t-0 md:border-l p-4 flex flex-col justify-center items-center gap-3">
+                                        <div onClick={(e) => e.stopPropagation()} className="col-span-12 md:col-span-3 bg-muted/10 border-t md:border-t-0 md:border-l p-4 flex flex-col justify-center items-center gap-3">
                                             <div className="text-center">
                                                 <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Total</span>
                                                 <div className="text-2xl font-bold text-money flex items-center justify-center gap-1">
@@ -329,6 +395,40 @@ export default function DashboardPage() {
                                             </div>
                                         </div>
                                     </div>
+
+                                    {/* Expanded Product Details */}
+                                    <AnimatePresence>
+                                        {expandedOrderId === order.id && (
+                                            <motion.div
+                                                initial={{ height: 0, opacity: 0 }}
+                                                animate={{ height: "auto", opacity: 1 }}
+                                                exit={{ height: 0, opacity: 0 }}
+                                                className="overflow-hidden border-t bg-muted/5 px-6"
+                                            >
+                                                <div className="py-4 space-y-3">
+                                                    <h4 className="text-xs font-bold uppercase text-muted-foreground flex items-center gap-2">
+                                                        <ShoppingBag className="w-3 h-3" /> Detalle de Productos
+                                                    </h4>
+                                                    {order.products && Array.isArray(order.products) && order.products.length > 0 ? (
+                                                        <div className="grid gap-2 text-sm">
+                                                            {order.products.map((prod: any, idx: number) => (
+                                                                <div key={idx} className="flex justify-between items-center border-b border-border/50 pb-2 last:border-0 last:pb-0">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <span className="font-mono bg-background border px-1.5 rounded text-xs">{prod.qty}</span>
+                                                                        <span>{prod.name}</span>
+                                                                        {prod.type && <span className="text-[10px] uppercase text-muted-foreground border px-1 rounded">{prod.type}</span>}
+                                                                    </div>
+                                                                    <span className="font-mono text-muted-foreground">${Number(prod.price * prod.qty).toLocaleString()}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-xs text-muted-foreground italic">No hay detalles de productos registrados.</p>
+                                                    )}
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
                                 </motion.div>
                             );
                         })}
