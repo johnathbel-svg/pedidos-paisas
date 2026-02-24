@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import React, { Suspense, useEffect, useState } from 'react';
 import { MapPin, Save, Printer, RefreshCw, Loader2, Truck, Store, User, Phone, Hash, ShoppingBag, ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
@@ -13,6 +13,7 @@ import Link from "next/link";
 
 const generateOrderId = () => `PED-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}A`;
 
+
 // Define Product Interface
 interface ProductItem {
     name: string;
@@ -21,38 +22,46 @@ interface ProductItem {
     type: string;
 }
 
+export const dynamic = 'force-dynamic';
+
 export default function PedidosPage() {
+    return (
+        <Suspense fallback={<div className="flex h-screen w-full items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>}>
+            <PedidosContent />
+        </Suspense>
+    );
+}
+
+function PedidosContent() {
+    // 1. Hooks & Router State
     const router = useRouter();
     const searchParams = useSearchParams();
-    const eventId = searchParams.get('eventId');
+    const eventId = searchParams.get('event_id');
 
-    const [orderId, setOrderId] = React.useState("");
-    const [isSaving, setIsSaving] = React.useState(false);
-    const [isLoadingEvent, setIsLoadingEvent] = React.useState(false);
+    // 2. Core State
+    const [orderId, setOrderId] = useState("");
+    const [isSaving, setIsSaving] = useState(false);
+    const [isLoadingEvent, setIsLoadingEvent] = useState(!!eventId);
 
-    // Values
-    const [deliveryType, setDeliveryType] = React.useState<"DOMICILIO" | "TIENDA">("DOMICILIO");
+    // 3. Form Configuration
+    const [deliveryType, setDeliveryType] = useState<"DOMICILIO" | "TIENDA">("DOMICILIO");
+    const [mounted, setMounted] = useState(false);
 
-    // Data
-    const [inv1Code, setInv1Code] = React.useState("");
-    const [inv1Value, setInv1Value] = React.useState("");
-    const [inv2Code, setInv2Code] = React.useState("");
-    const [inv2Value, setInv2Value] = React.useState("");
-    const [products, setProducts] = React.useState<ProductItem[]>([]);
+    // 4. Form Data
+    const [inv1Code, setInv1Code] = useState("");
+    const [inv1Value, setInv1Value] = useState("");
+    const [inv2Code, setInv2Code] = useState("");
+    const [inv2Value, setInv2Value] = useState("");
 
-    const [selectedClient, setSelectedClient] = React.useState<Client | null>(null);
-    const [clientName, setClientName] = React.useState("");
-    const [deliveryAddress, setDeliveryAddress] = React.useState("");
-    const [observations, setObservations] = React.useState("");
+    const [products, setProducts] = useState<ProductItem[]>([]);
 
-    React.useEffect(() => {
-        setOrderId(generateOrderId());
+    // 5. Client & Context
+    const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+    const [clientName, setClientName] = useState("");
+    const [deliveryAddress, setDeliveryAddress] = useState("");
+    const [observations, setObservations] = useState("");
 
-        if (eventId) {
-            loadInvoiceEvent(eventId);
-        }
-    }, [eventId]);
-
+    // 6. Helpers
     const loadInvoiceEvent = async (id: string) => {
         setIsLoadingEvent(true);
         const { data, error } = await supabase
@@ -76,6 +85,18 @@ export default function PedidosPage() {
         }
         setIsLoadingEvent(false);
     };
+
+    // 7. Effects
+    useEffect(() => {
+        setMounted(true);
+        setOrderId(generateOrderId());
+    }, []);
+
+    useEffect(() => {
+        if (eventId) {
+            loadInvoiceEvent(eventId);
+        }
+    }, [eventId]);
 
     const totalValue = React.useMemo(() => {
         // Prefer sum of products if available and matches invoices?
@@ -222,19 +243,23 @@ export default function PedidosPage() {
                         </div>
                         <div className="space-y-2">
                             <label className="text-xs font-medium">Valor</label>
-                            <input
-                                type="text"
-                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-right font-mono text-green-600 font-bold"
-                                value={inv1Value}
-                                onChange={(e) => {
-                                    const raw = e.target.value.replace(/[^0-9]/g, '');
-                                    setInv1Value(raw);
-                                }}
-                                placeholder="$ 0"
-                            />
-                            {inv1Value && <p className="text-xs text-right text-muted-foreground font-mono">${Number(inv1Value).toLocaleString()}</p>}
+                            <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-green-600 font-bold text-lg">$</span>
+                                <input
+                                    type="text"
+                                    className="flex h-12 w-full rounded-md border border-input bg-background pl-8 pr-3 py-1 text-lg shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-right font-mono font-bold text-green-600"
+                                    value={inv1Value}
+                                    onChange={(e) => {
+                                        const raw = e.target.value.replace(/[^0-9]/g, '');
+                                        setInv1Value(raw);
+                                    }}
+                                    placeholder="0"
+                                />
+                            </div>
                         </div>
+
                     </div>
+
 
                     {/* Invoice 2 */}
                     <div className={cn("space-y-4 rounded-lg border p-4 transition-all bg-card")}>
@@ -250,17 +275,19 @@ export default function PedidosPage() {
                         </div>
                         <div className="space-y-2">
                             <label className="text-xs font-medium">Valor</label>
-                            <input
-                                type="text"
-                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-right font-mono font-bold text-green-600"
-                                value={inv2Value}
-                                onChange={(e) => {
-                                    const raw = e.target.value.replace(/[^0-9]/g, '');
-                                    setInv2Value(raw);
-                                }}
-                                placeholder="$ 0"
-                            />
-                            {inv2Value && <p className="text-xs text-right text-muted-foreground font-mono">${Number(inv2Value).toLocaleString()}</p>}
+                            <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-green-600 font-bold text-lg">$</span>
+                                <input
+                                    type="text"
+                                    className="flex h-12 w-full rounded-md border border-input bg-background pl-8 pr-3 py-1 text-lg shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-right font-mono font-bold text-green-600"
+                                    value={inv2Value}
+                                    onChange={(e) => {
+                                        const raw = e.target.value.replace(/[^0-9]/g, '');
+                                        setInv2Value(raw);
+                                    }}
+                                    placeholder="0"
+                                />
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -423,7 +450,7 @@ export default function PedidosPage() {
                     <div className="text-center mb-4">
                         <h1 className="text-xl font-bold uppercase">Pedidos Paisas</h1>
                         <p className="text-sm">Ticket de Venta</p>
-                        <p className="text-xs mt-1">{new Date().toLocaleString()}</p>
+                        <p className="text-xs mt-1">{mounted ? new Date().toLocaleString() : ''}</p>
                     </div>
 
                     <div className="border-b-2 border-dashed border-black my-2"></div>
@@ -473,6 +500,6 @@ export default function PedidosPage() {
                     .print\\:block { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
                 }
             `}</style>
-        </div>
+        </div >
     );
 }

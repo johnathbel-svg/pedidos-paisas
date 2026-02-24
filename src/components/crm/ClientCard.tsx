@@ -89,22 +89,31 @@ export function ClientCard({ client }: ClientCardProps) {
                         )}
                     </div>
 
-                    {/* Metrics - estilo similar a pedidos */}
-                    <div className="grid grid-cols-3 gap-3 pt-3 border-t border-border">
+                    {/* Metrics - Grid 2x2 */}
+                    <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border">
                         <div>
                             <div className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground uppercase mb-0.5">
                                 <ShoppingBag className="w-3 h-3" />
                                 Pedidos
                             </div>
-                            <p className="text-xl font-bold text-foreground">{client.total_orders}</p>
+                            <p className="text-lg font-bold text-foreground">{client.total_orders}</p>
                         </div>
                         <div>
                             <div className="flex items-center gap-1 text-[10px] font-semibold text-green-500 uppercase mb-0.5">
                                 <DollarSign className="w-3 h-3" />
-                                Total
+                                LTV (Total)
                             </div>
-                            <p className="text-sm font-bold text-green-400">
+                            <p className="text-lg font-bold text-green-400">
                                 {formatCurrency(client.lifetime_value || 0)}
+                            </p>
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-1 text-[10px] font-semibold text-blue-500 uppercase mb-0.5" title="Valor Promedio de Pedido">
+                                <TrendingUp className="w-3 h-3" />
+                                Ticket Prom.
+                            </div>
+                            <p className="text-lg font-bold text-blue-400">
+                                {formatCurrency(client.average_order_value || 0)}
                             </p>
                         </div>
                         <div>
@@ -112,7 +121,7 @@ export function ClientCard({ client }: ClientCardProps) {
                                 <Calendar className="w-3 h-3" />
                                 Último
                             </div>
-                            <p className="text-xs font-medium text-foreground">
+                            <p className="text-xs font-medium text-foreground mt-1">
                                 {formatDate(client.last_order_date)}
                             </p>
                         </div>

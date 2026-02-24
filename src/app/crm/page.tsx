@@ -223,44 +223,69 @@ export default function CRMPage() {
                                     Fuentes de Registro
                                 </h3>
                                 {sourceDistribution.length > 0 ? (
-                                    <div style={{ filter: 'drop-shadow(0 0 12px rgba(139, 92, 246, 0.3))' }}>
-                                        <ResponsiveContainer width="100%" height={260}>
-                                            <PieChart>
-                                                <Pie
-                                                    data={sourceDistribution}
-                                                    cx="50%"
-                                                    cy="40%"
-                                                    innerRadius={50}
-                                                    outerRadius={80}
-                                                    paddingAngle={5}
-                                                    dataKey="count"
-                                                    label={false}
-                                                >
-                                                    {sourceDistribution.map((_, index) => (
-                                                        <Cell
-                                                            key={`cell-${index}`}
-                                                            fill={['#22c55e', '#3b82f6', '#f59e0b', '#FCA311', '#8b5cf6', '#ef4444'][index % 6]}
-                                                        />
-                                                    ))}
-                                                </Pie>
-                                                <Tooltip
-                                                    contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '8px' }}
-                                                    formatter={(value: any, name: any, props: any) => [
-                                                        `${value} clientes (${props.payload.percentage.toFixed(1)}%)`,
-                                                        props.payload.source
-                                                    ]}
-                                                />
-                                                <Legend
-                                                    verticalAlign="bottom"
-                                                    height={50}
-                                                    formatter={(value, entry: any) => {
-                                                        const item = sourceDistribution.find(d => d.source === value);
-                                                        return `${value}: ${item?.count || 0}`;
-                                                    }}
-                                                    wrapperStyle={{ fontSize: '11px' }}
-                                                />
-                                            </PieChart>
-                                        </ResponsiveContainer>
+                                    <div className="flex-1 flex items-center justify-center relative">
+                                        {/* Central Label */}
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                                            <span className="text-3xl font-bold text-foreground">
+                                                {sourceDistribution.reduce((sum, item) => sum + item.count, 0)}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground uppercase tracking-wider">Clientes</span>
+                                        </div>
+
+                                        <div className="w-full h-[260px]" style={{ filter: 'drop-shadow(0 0 12px rgba(139, 92, 246, 0.25))' }}>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie
+                                                        data={sourceDistribution}
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        innerRadius={70}
+                                                        outerRadius={100}
+                                                        paddingAngle={5}
+                                                        dataKey="count"
+                                                        nameKey="source"
+                                                        cornerRadius={6}
+                                                        stroke="none"
+                                                    >
+                                                        {sourceDistribution.map((_, index) => (
+                                                            <Cell
+                                                                key={`cell-${index}`}
+                                                                fill={['#22c55e', '#3b82f6', '#f59e0b', '#FCA311', '#8b5cf6', '#ef4444'][index % 6]}
+                                                            />
+                                                        ))}
+                                                    </Pie>
+                                                    <Tooltip
+                                                        contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
+                                                        itemStyle={{ color: '#fff' }}
+                                                        formatter={(value: any, name: any, props: any) => {
+                                                            const rawSource = props.payload.source;
+                                                            let label = rawSource;
+                                                            if (['DIRECT', 'PHONE', 'UNKNOWN'].includes(rawSource)) label = 'Sistema (Asesor)';
+                                                            if (rawSource === 'REFERRAL' || rawSource === 'WEB' || rawSource === 'AUTO_REGISTRO') label = 'Auto-registro (Web)';
+
+                                                            return [
+                                                                <span key="val" className="font-mono text-lg">{value} <span className="text-xs text-muted-foreground">({props.payload.percentage.toFixed(1)}%)</span></span>,
+                                                                <span key="name" className="uppercase text-xs font-bold text-muted-foreground mb-1 block">{label}</span>
+                                                            ]
+                                                        }}
+                                                        labelStyle={{ display: 'none' }}
+                                                    />
+                                                    <Legend
+                                                        verticalAlign="bottom"
+                                                        height={36}
+                                                        iconType="circle"
+                                                        formatter={(value, entry: any) => {
+                                                            const item = sourceDistribution.find(d => d.source === value);
+                                                            let label = value;
+                                                            if (['DIRECT', 'PHONE', 'UNKNOWN'].includes(value)) label = 'Sistema';
+                                                            if (value === 'REFERRAL' || value === 'WEB' || value === 'AUTO_REGISTRO') label = 'Auto-registro';
+
+                                                            return <span className="text-xs font-medium text-muted-foreground ml-1 uppercase">{label}: {item?.count || 0}</span>;
+                                                        }}
+                                                    />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
                                     </div>
                                 ) : (
                                     <p className="text-center text-muted-foreground py-8">No hay datos</p>

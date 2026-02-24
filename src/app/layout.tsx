@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
-import { MainNav } from "@/components/main-nav";
+import { TopBar } from "@/components/TopBar";
 import { Toaster } from "sonner";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -21,15 +21,7 @@ export default function RootLayout({
     <html lang="es" className="dark">
       <body className={cn(inter.className, "min-h-screen bg-background font-sans antialiased")}>
         <div className="flex-col md:flex">
-          <div className="border-b">
-            <div className="flex h-16 items-center px-4">
-              <h1 className="text-xl font-bold mr-8 tracking-tight">Fast Order</h1>
-              <MainNav />
-              <div className="ml-auto flex items-center space-x-4">
-                {/* UserNav or similar goes here */}
-              </div>
-            </div>
-          </div>
+          <TopBar />
           <main className="flex-1 space-y-4 p-8 pt-6">
             {children}
           </main>

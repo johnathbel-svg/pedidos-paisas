@@ -1,6 +1,6 @@
 'use server';
 
-import { query } from "@/lib/db";
+import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 
 export async function registerClient(formData: FormData) {
@@ -18,29 +18,49 @@ export async function registerClient(formData: FormData) {
     const fullName = `${firstName} ${lastName}`.trim().toUpperCase();
 
     try {
-        // Direct PostgreSQL insert (bypassing Supabase REST API)
-        await query(
-            `INSERT INTO public.clients (first_name, last_name, full_name, phone, document_id, address)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [
-                firstName.toUpperCase(),
-                lastName.toUpperCase(),
-                fullName,
-                phone,
-                documentId || null,
-                address?.toUpperCase() || null,
-            ]
-        );
+        const supabase = await createClient();
 
+        console.log("Starting registration for:", phone);
+
+        const { data, error } = await supabase
+            .from('clients')
+            .insert({
+                first_name: firstName.toUpperCase(),
+                last_name: lastName.toUpperCase(),
+                full_name: fullName,
+                phone: phone,
+                document_id: documentId || null,
+                address: address?.toUpperCase() || null,
+                source: 'REFERRAL', // Mapped to "Auto-registro" in UI
+                status: 'ACTIVE',
+                total_orders: 0
+            })
+            .select()
+            .single();
+
+        if (error) {
+            console.error("Supabase insert error:", error);
+            if (error.code === '23505') {
+                return { success: false, message: "Este número de teléfono ya está registrado." };
+            }
+            throw error;
+        }
+
+        console.log("Client created with ID:", data.id);
+
+        // EXTRA SAFETY: Force update source to REFERRAL to be 100% sure
+        const updateResult = await supabase
+            .from('clients')
+            .update({ source: 'REFERRAL' })
+            .eq('id', data.id)
+            .select();
+
+        console.log("Update result:", updateResult);
+
+        revalidatePath('/crm');
         return { success: true, message: "¡Registro exitoso!" };
     } catch (error: any) {
         console.error("Error registering client:", error);
-
-        // Handle duplicate phone number
-        if (error.code === '23505') {
-            return { success: false, message: "Este número de teléfono ya está registrado." };
-        }
-
         return { success: false, message: `Error: ${error.message}` };
     }
 }

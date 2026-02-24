@@ -28,9 +28,17 @@ export default function AnalyticsPage() {
         const end = new Date();
         const start = new Date();
         start.setDate(start.getDate() - 30);
+
+        const formatDate = (d: Date) => {
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
         return {
-            start: start.toISOString().split('T')[0],
-            end: end.toISOString().split('T')[0]
+            start: formatDate(start),
+            end: formatDate(end)
         };
     });
 
@@ -129,7 +137,7 @@ export default function AnalyticsPage() {
                                 type="date"
                                 value={dateRange.start}
                                 onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                                className="px-3 py-2 text-sm border border-input bg-background rounded-md focus:ring-2 focus:ring-brand"
+                                className="px-3 py-2 text-sm border border-input bg-background rounded-md focus:ring-2 focus:ring-brand dark:[color-scheme:dark]"
                             />
                         </div>
                         <div>
@@ -138,7 +146,7 @@ export default function AnalyticsPage() {
                                 type="date"
                                 value={dateRange.end}
                                 onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                                className="px-3 py-2 text-sm border border-input bg-background rounded-md focus:ring-2 focus:ring-brand"
+                                className="px-3 py-2 text-sm border border-input bg-background rounded-md focus:ring-2 focus:ring-brand dark:[color-scheme:dark]"
                             />
                         </div>
                     </div>
@@ -248,12 +256,36 @@ export default function AnalyticsPage() {
                                             </linearGradient>
                                         </defs>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                                        <XAxis dataKey="date" stroke="#888" fontSize={11} tickFormatter={(value) => new Date(value).getDate().toString()} />
+                                        <XAxis
+                                            dataKey="date"
+                                            stroke="#888"
+                                            fontSize={11}
+                                            tickFormatter={(value) => {
+                                                // Value is "YYYY-MM-DD"
+                                                // Create date as UTC
+                                                const [y, m, d] = value.split('-').map(Number);
+                                                const date = new Date(Date.UTC(y, m - 1, d));
+                                                // Use getUTCDate to get the day in UTC, ignoring local offset
+                                                return date.getUTCDate().toString();
+                                            }}
+                                        />
                                         <YAxis stroke="#888" fontSize={11} />
                                         <Tooltip
                                             contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '8px' }}
                                             labelStyle={{ color: '#fff', marginBottom: '8px' }}
                                             formatter={(value: any) => formatCurrency(value)}
+                                            labelFormatter={(value) => {
+                                                if (!value) return '';
+                                                const [y, m, d] = value.split('-').map(Number);
+                                                const date = new Date(Date.UTC(y, m - 1, d));
+                                                return date.toLocaleDateString('es-CO', {
+                                                    weekday: 'long',
+                                                    year: 'numeric',
+                                                    month: 'long',
+                                                    day: 'numeric',
+                                                    timeZone: 'UTC'
+                                                });
+                                            }}
                                         />
                                         <Area type="monotone" dataKey="delivered_revenue" stroke="#FCA311" strokeWidth={2} fill="url(#colorRevenue)" />
                                     </AreaChart>
@@ -265,47 +297,61 @@ export default function AnalyticsPage() {
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: 0.1 }}
-                                className="rounded-xl border bg-card p-6 shadow-sm"
+                                className="rounded-xl border bg-card p-6 shadow-sm flex flex-col"
                             >
-                                <h3 className="text-lg font-bold text-foreground flex items-center gap-2 mb-4">
+                                <h3 className="text-lg font-bold text-foreground flex items-center gap-2 mb-6">
                                     <Package className="w-5 h-5" />
                                     Tipo de Entrega
                                 </h3>
-                                <div style={{ filter: 'drop-shadow(0 0 12px rgba(59, 130, 246, 0.3))' }}>
-                                    <ResponsiveContainer width="100%" height={280}>
-                                        <PieChart>
-                                            <Pie
-                                                data={deliveryBreakdown}
-                                                cx="50%"
-                                                cy="42%"
-                                                innerRadius={55}
-                                                outerRadius={85}
-                                                paddingAngle={6}
-                                                dataKey="total_orders"
-                                                label={false}
-                                            >
-                                                {deliveryBreakdown.map((entry, index) => (
-                                                    <Cell key={`cell-${index}`} fill={NEON_COLORS[index % NEON_COLORS.length]} />
-                                                ))}
-                                            </Pie>
-                                            <Tooltip
-                                                contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '8px' }}
-                                                formatter={(value: any, name: any, props: any) => [
-                                                    `${value} pedidos (${formatCurrency(props.payload.total_revenue)})`,
-                                                    props.payload.delivery_type
-                                                ]}
-                                            />
-                                            <Legend
-                                                verticalAlign="bottom"
-                                                height={50}
-                                                formatter={(value, entry: any) => {
-                                                    const item = deliveryBreakdown.find(d => d.delivery_type === value);
-                                                    return `${value}: ${item?.total_orders || 0}`;
-                                                }}
-                                                wrapperStyle={{ fontSize: '12px' }}
-                                            />
-                                        </PieChart>
-                                    </ResponsiveContainer>
+                                <div className="flex-1 flex items-center justify-center relative">
+                                    {/* Central Label */}
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                                        <span className="text-3xl font-bold text-foreground">
+                                            {deliveryBreakdown.reduce((sum, item) => sum + item.total_orders, 0)}
+                                        </span>
+                                        <span className="text-xs text-muted-foreground uppercase tracking-wider">Pedidos</span>
+                                    </div>
+
+                                    <div className="w-full h-[280px]" style={{ filter: 'drop-shadow(0 0 15px rgba(0,0,0,0.2))' }}>
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <PieChart>
+                                                <Pie
+                                                    data={deliveryBreakdown}
+                                                    cx="50%"
+                                                    cy="50%"
+                                                    innerRadius={80}
+                                                    outerRadius={110}
+                                                    paddingAngle={5}
+                                                    dataKey="total_orders"
+                                                    cornerRadius={6}
+                                                    stroke="none"
+                                                >
+                                                    {deliveryBreakdown.map((entry, index) => {
+                                                        // Use brand colors: Green, Blue, Orange
+                                                        const COLORS = ['#10b981', '#3b82f6', '#f97316', '#8b5cf6'];
+                                                        return <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />;
+                                                    })}
+                                                </Pie>
+                                                <Tooltip
+                                                    contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
+                                                    itemStyle={{ color: '#fff' }}
+                                                    formatter={(value: any, name: any, props: any) => [
+                                                        <span key="val" className="font-mono text-lg">{value} <span className="text-xs text-muted-foreground">({formatCurrency(props.payload.total_revenue)})</span></span>,
+                                                        <span key="name" className="uppercase text-xs font-bold text-muted-foreground mb-1 block">{props.payload.delivery_type}</span>
+                                                    ]}
+                                                    labelStyle={{ display: 'none' }}
+                                                />
+                                                <Legend
+                                                    verticalAlign="bottom"
+                                                    height={36}
+                                                    iconType="circle"
+                                                    formatter={(value, entry: any) => (
+                                                        <span className="text-xs font-medium text-muted-foreground ml-1 uppercase">{value}</span>
+                                                    )}
+                                                />
+                                            </PieChart>
+                                        </ResponsiveContainer>
+                                    </div>
                                 </div>
                             </motion.div>
                         </div>
@@ -330,6 +376,7 @@ export default function AnalyticsPage() {
                                             <YAxis dataKey="product_name" type="category" stroke="#888" fontSize={11} width={120} />
                                             <Tooltip
                                                 contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '8px' }}
+                                                cursor={{ fill: 'transparent' }}
                                                 formatter={(value: any) => formatCurrency(value)}
                                             />
                                             <Bar dataKey="total_revenue" fill="#22c55e" radius={[0, 4, 4, 0]} />
@@ -401,6 +448,7 @@ export default function AnalyticsPage() {
                                                 <YAxis stroke="#888" fontSize={11} />
                                                 <Tooltip
                                                     contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '8px' }}
+                                                    cursor={{ fill: 'transparent' }}
                                                     formatter={(value: any, name: any) => {
                                                         if (name === 'total_revenue') return [`${formatCurrency(value)}`, 'Ingresos'];
                                                         if (name === 'total_orders') return [`${value} pedidos`, 'Pedidos'];

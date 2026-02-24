@@ -286,7 +286,7 @@ export async function getCRMMetrics() {
         const { data: retentionData } = await supabase
             .rpc('calculate_client_retention')
             .single();
-        retentionRate = retentionData?.retention_rate || 0;
+        retentionRate = (retentionData as any)?.retention_rate || 0;
     } catch (error) {
         console.warn('calculate_client_retention RPC not available:', error);
     }

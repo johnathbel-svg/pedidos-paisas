@@ -58,77 +58,57 @@ export interface ClientTag {
 }
 
 // Analytics Types
-export interface DailySales {
+export interface DailySalesData {
     date: string;
     total_orders: number;
-    completed_orders: number;
-    pending_orders: number;
-    in_delivery_orders: number;
     total_revenue: number;
-    average_order_value: number;
+    delivered_orders: number;
+    delivered_revenue: number;
 }
 
 export interface RevenueComparison {
-    current: {
-        revenue: number;
-        orders: number;
-        period: 'week' | 'month' | 'year';
-        start_date: string;
-        end_date: string;
+    current_period: {
+        total_revenue: number;
+        delivered_revenue: number;
+        total_orders: number;
     };
-    previous: {
-        revenue: number;
-        orders: number;
-        period: 'week' | 'month' | 'year';
-        start_date: string;
-        end_date: string;
+    previous_period: {
+        total_revenue: number;
+        delivered_revenue: number;
+        total_orders: number;
     };
-    change: {
-        revenue_percent: number;
-        orders_percent: number;
-        revenue_absolute: number;
-        orders_absolute: number;
-    };
+    percentage_change: number;
 }
 
-export interface ProductStat {
-    name: string;
-    count: number;
-    totalValue: number;
+export interface TopProduct {
+    product_name: string;
+    total_quantity: number;
+    total_revenue: number;
+    order_count: number;
 }
 
 export interface DeliveryTypeBreakdown {
-    DOMICILIO?: {
-        count: number;
-        revenue: number;
-        completed: number;
-    };
-    TIENDA?: {
-        count: number;
-        revenue: number;
-        completed: number;
-    };
+    delivery_type: string;
+    total_orders: number;
+    total_revenue: number;
+    delivered_orders: number;
 }
 
 export interface DriverPerformance {
-    id: string;
-    name: string;
-    total_orders: number;
-    completed_orders: number;
+    driver_id: string;
+    driver_name: string;
+    total_deliveries: number;
+    completed_deliveries: number;
     total_revenue: number;
-    completion_rate: number;
 }
 
 export interface MetricsSummary {
-    today: {
-        total_orders: number;
-        completed_orders: number;
-        revenue: number;
-    };
-    totals: {
-        clients: number;
-        drivers: number;
-    };
+    total_orders: number;
+    delivered_orders: number;
+    total_revenue: number;
+    delivered_revenue: number;
+    average_order_value: number;
+    new_clients: number;
 }
 
 // Advanced Analytics Types

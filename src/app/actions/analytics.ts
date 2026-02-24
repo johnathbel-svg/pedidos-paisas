@@ -14,11 +14,36 @@ import type { DailySalesData, RevenueComparison, TopProduct, DeliveryTypeBreakdo
 export async function getDailySales(startDate: string, endDate: string) {
     const supabase = await createClient();
 
+    // Generate full date range
+    const dates: Record<string, DailySalesData> = {};
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    // Create query end date that covers the full last day
+    const queryEndDate = new Date(endDate);
+    queryEndDate.setHours(23, 59, 59, 999);
+    const queryEndStr = queryEndDate.toISOString();
+
+    // Adjust end date to include the full day (if it's just a date string)
+    // If endDate is "2026-02-08", we want to include entries up to "2026-02-08 23:59:59"
+    // The query .lte() handles this if the input is correct, but let's ensure loop covers it.
+
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split('T')[0];
+        dates[dateStr] = {
+            date: dateStr,
+            total_orders: 0,
+            total_revenue: 0,
+            delivered_orders: 0,
+            delivered_revenue: 0
+        };
+    }
+
     const { data, error } = await supabase
         .from('orders')
         .select('created_at, total_value, status')
         .gte('created_at', startDate)
-        .lte('created_at', endDate)
+        .lte('created_at', queryEndStr)
         .order('created_at', { ascending: true });
 
     if (error) {
@@ -26,32 +51,40 @@ export async function getDailySales(startDate: string, endDate: string) {
         throw error;
     }
 
-    // Group by date
-    const salesByDate = (data || []).reduce((acc: Record<string, DailySalesData>, order) => {
-        const date = new Date(order.created_at).toISOString().split('T')[0];
+    // Group by date (handling timezone offset roughly by using split('T')[0] on the ISO string which is UTC)
+    // If the user wants local time aggregation, we might need a more complex approach.
+    // For now, assuming standard ISO strings from DB.
 
-        if (!acc[date]) {
-            acc[date] = {
-                date,
-                total_orders: 0,
-                total_revenue: 0,
-                delivered_orders: 0,
-                delivered_revenue: 0
-            };
+    (data || []).forEach((order) => {
+        // Fix: Use local date string if possible, or consistent UTC.
+        // If order.created_at is UTC "2026-02-08T19:00:00Z" (which is 2pm local), 
+        // split('T')[0] gives "2026-02-08". This is correct for the server's perspective.
+        // We just need to make sure the chart uses the same convention.
+
+        // However, if we want to support "Today" correctly when it's late in the day UTC but still today locally.
+        // Safe parsing of date string
+        let date = '';
+        try {
+            // If it's a full ISO string, taking the first part works for UTC dates
+            // For local time accuracy, we should parse and adjust, but for now consistent UTC buckets is better than gaps
+            date = order.created_at.split('T')[0];
+        } catch (e) {
+            // Fallback
+            date = new Date(order.created_at).toISOString().split('T')[0];
         }
 
-        acc[date].total_orders += 1;
-        acc[date].total_revenue += Number(order.total_value) || 0;
+        if (dates[date]) {
+            dates[date].total_orders += 1;
+            dates[date].total_revenue += Number(order.total_value) || 0;
 
-        if (order.status === 'ENTREGADO') {
-            acc[date].delivered_orders += 1;
-            acc[date].delivered_revenue += Number(order.total_value) || 0;
+            if (order.status === 'ENTREGADO') {
+                dates[date].delivered_orders += 1;
+                dates[date].delivered_revenue += Number(order.total_value) || 0;
+            }
         }
+    });
 
-        return acc;
-    }, {});
-
-    return Object.values(salesByDate);
+    return Object.values(dates).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export async function getRevenueComparison(currentStart: string, currentEnd: string, previousStart: string, previousEnd: string): Promise<RevenueComparison> {
@@ -300,15 +333,15 @@ export async function getTopClients(startDate: string, endDate: string, limit = 
             total_value,
             status,
             created_at,
-            clients (
+            client_name,
+            clients:client_id (
                 id,
                 full_name,
-                rfm_segment
+                phone
             )
         `)
         .gte('created_at', startDate)
         .lte('created_at', endDate)
-        .not('client_id', 'is', null)
         .eq('status', 'ENTREGADO');
 
     if (error) {
@@ -319,9 +352,19 @@ export async function getTopClients(startDate: string, endDate: string, limit = 
     const clientStats: Record<string, any> = {};
 
     (data || []).forEach((order: any) => {
-        const clientId = order.client_id;
-        const clientName = order.clients?.full_name || 'Desconocido';
-        const rfmSegment = order.clients?.rfm_segment;
+        // Safe access to client data
+        const clientId = order.client_id || 'unknown';
+        // Fallback hierarchy: Link -> Order Fallback -> Default
+        let clientName = order.clients?.full_name || order.client_name;
+
+        let phone = order.clients?.phone;
+
+        // Group anonymous/unlinked orders
+        if (clientId === 'unknown' && !clientName) {
+            clientName = 'Cliente Ocasional';
+        } else if (!clientName) {
+            clientName = 'Sin Nombre';
+        }
 
         if (!clientStats[clientId]) {
             clientStats[clientId] = {
@@ -330,7 +373,7 @@ export async function getTopClients(startDate: string, endDate: string, limit = 
                 total_orders: 0,
                 total_revenue: 0,
                 last_order_date: order.created_at,
-                rfm_segment: rfmSegment
+                phone: phone
             };
         }
 
@@ -398,18 +441,39 @@ export async function getWeekdayPatterns(startDate: string, endDate: string) {
 export async function getMonthlyTrends(startDate: string, endDate: string) {
     const supabase = await createClient();
 
+    // Determine the year from the startDate or endDate to generate the full year view
+    // Default to current year if range crosses years or is ambiguous, but usually for "Monthly Trends" 
+    // users expect to see the current year's progression.
+    const start = new Date(startDate);
+    const year = start.getFullYear();
+
+    // Generate all 12 months for the specific year
+    const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    const monthlyStats: Record<string, any> = {};
+
+    for (let i = 0; i < 12; i++) {
+        const monthKey = `${year}-${String(i + 1).padStart(2, '0')}`;
+        monthlyStats[monthKey] = {
+            month: monthKey,
+            month_name: `${monthNames[i]} ${year}`,
+            total_orders: 0,
+            total_revenue: 0,
+            new_clients: 0
+        };
+    }
+
     const [ordersData, clientsData] = await Promise.all([
         supabase
             .from('orders')
             .select('created_at, total_value, status')
-            .gte('created_at', startDate)
-            .lte('created_at', endDate)
+            .gte('created_at', `${year}-01-01`) // Fetch full year to fill the chart
+            .lte('created_at', `${year}-12-31 23:59:59`)
             .eq('status', 'ENTREGADO'),
         supabase
             .from('clients')
             .select('created_at')
-            .gte('created_at', startDate)
-            .lte('created_at', endDate)
+            .gte('created_at', `${year}-01-01`)
+            .lte('created_at', `${year}-12-31 23:59:59`)
     ]);
 
     if (ordersData.error) {
@@ -417,26 +481,14 @@ export async function getMonthlyTrends(startDate: string, endDate: string) {
         return [];
     }
 
-    const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-    const monthlyStats: Record<string, any> = {};
-
     (ordersData.data || []).forEach((order: any) => {
         const date = new Date(order.created_at);
         const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-        const monthName = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
 
-        if (!monthlyStats[monthKey]) {
-            monthlyStats[monthKey] = {
-                month: monthKey,
-                month_name: monthName,
-                total_orders: 0,
-                total_revenue: 0,
-                new_clients: 0
-            };
+        if (monthlyStats[monthKey]) {
+            monthlyStats[monthKey].total_orders += 1;
+            monthlyStats[monthKey].total_revenue += Number(order.total_value) || 0;
         }
-
-        monthlyStats[monthKey].total_orders += 1;
-        monthlyStats[monthKey].total_revenue += Number(order.total_value) || 0;
     });
 
     (clientsData.data || []).forEach((client: any) => {

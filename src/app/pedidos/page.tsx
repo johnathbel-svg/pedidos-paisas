@@ -3,7 +3,7 @@
 import * as React from "react";
 import { supabase } from "@/lib/supabase";
 import { Order, DeliveryDriver } from "@/types/order";
-import { Clock, CheckCircle2, Truck, DollarSign, Plus, MapPin, Store, Receipt, Users, User, BarChart3, ShoppingBag } from "lucide-react";
+import { Clock, CheckCircle2, Truck, DollarSign, Plus, MapPin, Store, Receipt, Users, User, BarChart3, ShoppingBag, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -21,12 +21,19 @@ import { toast } from "sonner";
 export default function DashboardPage() {
     const [orders, setOrders] = React.useState<Order[]>([]);
     const [loading, setLoading] = React.useState(true);
-    const [selectedDate, setSelectedDate] = React.useState<string>(new Date().toISOString().split('T')[0]);
+    const [selectedDate, setSelectedDate] = React.useState<string>(() => {
+        const d = new Date();
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    });
     const [isDriversModalOpen, setIsDriversModalOpen] = React.useState(false);
     const [activeDrivers, setActiveDrivers] = React.useState<DeliveryDriver[]>([]);
     const [invoiceEvent, setInvoiceEvent] = React.useState<InvoiceEvent | null>(null);
     const [isInvoiceModalOpen, setIsInvoiceModalOpen] = React.useState(false);
     const [expandedOrderId, setExpandedOrderId] = React.useState<string | null>(null);
+    const [isSimulating, setIsSimulating] = React.useState(false);
     const router = useRouter();
 
     const fetchOrders = async () => {
@@ -177,7 +184,7 @@ export default function DashboardPage() {
     const handleInvoiceAccept = (event: InvoiceEvent) => {
         setIsInvoiceModalOpen(false);
         toast.info("Redirigiendo a nuevo pedido...");
-        router.push(`/nuevo-pedido?eventId=${event.id}`);
+        router.push(`/nuevo-pedido?event_id=${event.id}`);
     };
 
     const handleInvoiceIgnore = async (id: string) => {
@@ -185,6 +192,24 @@ export default function DashboardPage() {
         await ignoreInvoiceEvent(id);
         setInvoiceEvent(null);
         toast.dismiss();
+    };
+
+    // Test utility: Simulate a Milenium print event
+    const handleSimulatePrint = async () => {
+        setIsSimulating(true);
+        try {
+            const res = await fetch('/api/test-print', { method: 'POST' });
+            const json = await res.json();
+            if (json.success) {
+                toast.success(`🖨️ Impresión simulada: ${json.event.invoice_number_1}`);
+            } else {
+                toast.error('Error al simular: ' + json.error);
+            }
+        } catch (e) {
+            toast.error('Error de red al simular impresión');
+        } finally {
+            setIsSimulating(false);
+        }
     };
 
     if (loading && orders.length === 0) return <div className="p-8 flex justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand"></div></div>;
@@ -243,6 +268,16 @@ export default function DashboardPage() {
                             >
                                 <Users className="mr-2 h-4 w-4" /> Domiciliarios
                             </button>
+                            {/* TEST BUTTON: Remove after Milenium integration is verified */}
+                            <button
+                                onClick={handleSimulatePrint}
+                                disabled={isSimulating}
+                                title="Simula una impresión de Milenium (solo para pruebas)"
+                                className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring border border-orange-500/50 bg-orange-950/30 hover:bg-orange-900/50 text-orange-400 hover:text-orange-300 h-9 px-4 shadow-sm disabled:opacity-50"
+                            >
+                                <Printer className="mr-2 h-4 w-4" />
+                                {isSimulating ? 'Simulando...' : 'TEST: Simular Impresión'}
+                            </button>
                             <Link href="/nuevo-pedido" className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-brand hover:bg-brand/90 text-black font-bold h-9 px-6 shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
                                 <Plus className="mr-2 h-4 w-4" /> Nuevo Pedido
                             </Link>
@@ -297,6 +332,16 @@ export default function DashboardPage() {
                                     onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
                                 >
                                     <div className="grid grid-cols-1 md:grid-cols-12 gap-0">
+                                        {/* Print Button (Absolute) */}
+                                        <Link
+                                            href={`/pedidos/imprimir/${order.id}`}
+                                            target="_blank"
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="absolute top-4 right-4 md:right-auto md:left-[calc(100%-3rem)] z-10 p-2 text-muted-foreground hover:text-brand bg-white/50 hover:bg-white rounded-full transition-all shadow-sm border border-transparent hover:border-brand/20 opacity-0 group-hover:opacity-100"
+                                            title="Imprimir Ticket"
+                                        >
+                                            <Printer className="w-4 h-4" />
+                                        </Link>
 
                                         {/* Left Status Bar */}
                                         <div className={cn("hidden md:block w-2 h-full absolute left-0 top-0 bottom-0 rounded-l-xl", statusColor)} />
@@ -373,10 +418,16 @@ export default function DashboardPage() {
 
                                                 {order.status === 'TOMADO' && (
                                                     <button
-                                                        onClick={() => updateStatus(order.id, 'DESPACHO')}
-                                                        className="w-full bg-brand hover:bg-brand/90 text-black font-semibold py-2 px-4 rounded-md shadow-sm transition-all hover:shadow-md text-sm flex items-center justify-center gap-2 active:scale-95"
+                                                        onClick={() => updateStatus(order.id, order.delivery_type === 'TIENDA' ? 'ENTREGADO' : 'DESPACHO')}
+                                                        className={cn(
+                                                            "w-full font-semibold py-2 px-4 rounded-md shadow-sm transition-all hover:shadow-md text-sm flex items-center justify-center gap-2 active:scale-95",
+                                                            order.delivery_type === 'TIENDA'
+                                                                ? "bg-green-600 hover:bg-green-700 text-white"
+                                                                : "bg-brand hover:bg-brand/90 text-black"
+                                                        )}
                                                     >
-                                                        <Truck className="h-4 w-4" /> A Despacho
+                                                        {order.delivery_type === 'TIENDA' ? <CheckCircle2 className="h-4 w-4" /> : <Truck className="h-4 w-4" />}
+                                                        {order.delivery_type === 'TIENDA' ? "Entrega" : "A Despacho"}
                                                     </button>
                                                 )}
                                                 {order.status === 'DESPACHO' && (
@@ -384,7 +435,7 @@ export default function DashboardPage() {
                                                         onClick={() => updateStatus(order.id, 'ENTREGADO')}
                                                         className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-md shadow-sm transition-all hover:shadow-md text-sm flex items-center justify-center gap-2 active:scale-95"
                                                     >
-                                                        <CheckCircle2 className="h-4 w-4" /> Entregar
+                                                        <CheckCircle2 className="h-4 w-4" /> Entrega
                                                     </button>
                                                 )}
                                                 {order.status === 'ENTREGADO' && (
@@ -416,7 +467,7 @@ export default function DashboardPage() {
                                                                     <div className="flex items-center gap-3">
                                                                         <span className="font-mono bg-background border px-1.5 rounded text-xs">{prod.qty}</span>
                                                                         <span>{prod.name}</span>
-                                                                        {prod.type && <span className="text-[10px] uppercase text-muted-foreground border px-1 rounded">{prod.type}</span>}
+                                                                        {prod.type && prod.type !== 'DIAN' && <span className="text-[10px] uppercase text-muted-foreground border px-1 rounded">{prod.type}</span>}
                                                                     </div>
                                                                     <span className="font-mono text-muted-foreground">${Number(prod.price * prod.qty).toLocaleString()}</span>
                                                                 </div>
