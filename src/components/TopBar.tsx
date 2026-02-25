@@ -19,7 +19,8 @@ import {
     Archive,
     Store,
     ChevronDown,
-    Truck
+    Truck,
+    ClipboardList
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -112,6 +113,14 @@ export function TopBar() {
             icon: BarChart3,
             color: "text-green-500",
             bgColor: "bg-green-500/10",
+        },
+        {
+            title: "Cuadre",
+            description: "Cierre diario",
+            href: "/cuadre",
+            icon: ClipboardList,
+            color: "text-amber-500",
+            bgColor: "bg-amber-500/10",
         },
         {
             title: "Historial",

@@ -10,7 +10,7 @@ export interface DeliveryDriver {
 export interface Order {
     id: string; // UUID from Supabase
     public_id: string; // The readable ID e.g. PED-001
-    status: 'TOMADO' | 'DESPACHO' | 'ENTREGADO' | 'PAGADO';
+    status: 'TOMADO' | 'DESPACHO' | 'EN_CAMINO' | 'ENTREGADO' | 'PAGADO' | 'CANCELADO';
     client_name: string;
     client_id?: string; // NEW: Foreign key to clients table for CRM tracking
     total_value: number;

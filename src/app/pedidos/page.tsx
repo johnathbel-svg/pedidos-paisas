@@ -13,7 +13,7 @@ import { DateFilter } from "@/components/ui/DateFilter";
 import { DriverSelector } from "@/components/ui/DriverSelector";
 import { CRMIcon } from "@/components/icons/CRMIcon";
 import { InvoiceCaptureModal, InvoiceEvent } from "@/components/orders/InvoiceCaptureModal";
-import { processInvoiceEvent, ignoreInvoiceEvent } from "@/app/actions/invoices";
+import { ignoreInvoiceEvent } from "@/app/actions/invoices";
 import { toast } from "sonner";
 
 
@@ -30,8 +30,21 @@ export default function DashboardPage() {
     });
     const [isDriversModalOpen, setIsDriversModalOpen] = React.useState(false);
     const [activeDrivers, setActiveDrivers] = React.useState<DeliveryDriver[]>([]);
+    // --- Invoice capture state machine ---
     const [invoiceEvent, setInvoiceEvent] = React.useState<InvoiceEvent | null>(null);
+    const [secondInvoiceEvent, setSecondInvoiceEvent] = React.useState<InvoiceEvent | null>(null);
     const [isInvoiceModalOpen, setIsInvoiceModalOpen] = React.useState(false);
+    const [isWaitingForSecond, setIsWaitingForSecond] = React.useState(false);
+    const [waitRemaining, setWaitRemaining] = React.useState(0);
+    const waitTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const waitIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+    const PATIENCE_MS = 2500; // 2.5 seconds wait for second invoice
+    // --- end invoice state ---
+    // State-mirror refs: always hold the latest value, readable inside stale closures
+    const isModalOpenRef = React.useRef(false);
+    const isWaitingRef = React.useRef(false);
+    // Ref so callbacks inside useEffect always have the latest version of openInvoiceWithWait
+    const openInvoiceWithWaitRef = React.useRef<(e: InvoiceEvent) => void>(() => { });
     const [expandedOrderId, setExpandedOrderId] = React.useState<string | null>(null);
     const [isSimulating, setIsSimulating] = React.useState(false);
     const router = useRouter();
@@ -41,21 +54,39 @@ export default function DashboardPage() {
         const startOfDay = new Date(`${selectedDate}T00:00:00`).toISOString();
         const endOfDay = new Date(`${selectedDate}T23:59:59.999`).toISOString();
 
-        const { data, error } = await supabase
-            .from('orders')
-            .select(`
-                *,
-                delivery_drivers (
-                    id,
-                    full_name
-                )
-            `)
-            .gte('created_at', startOfDay)
-            .lte('created_at', endOfDay)
-            .order('created_at', { ascending: false });
+        const orderSelect = `*, delivery_drivers ( id, full_name )`;
 
-        if (error) console.error("Error fetching orders:", error);
-        else setOrders(data as Order[] || []);
+        // Run both queries concurrently:
+        // 1. All orders for the selected date
+        // 2. Active (non-delivered) orders from BEFORE the selected date
+        const [todayResult, previousResult] = await Promise.all([
+            supabase
+                .from('orders')
+                .select(orderSelect)
+                .gte('created_at', startOfDay)
+                .lte('created_at', endOfDay)
+                .order('created_at', { ascending: false }),
+            supabase
+                .from('orders')
+                .select(orderSelect)
+                .lt('created_at', startOfDay)
+                .not('status', 'in', '("ENTREGADO","CANCELADO")')
+                .order('created_at', { ascending: false }),
+        ]);
+
+        if (todayResult.error) console.error("Error fetching today's orders:", todayResult.error);
+        if (previousResult.error) console.error("Error fetching previous pending orders:", previousResult.error);
+
+        // Merge & de-duplicate by id, keeping today's orders first (more recent)
+        const todayOrders = (todayResult.data as Order[]) || [];
+        const previousOrders = (previousResult.data as Order[]) || [];
+        const seen = new Set(todayOrders.map(o => o.id));
+        const merged = [
+            ...todayOrders,
+            ...previousOrders.filter(o => !seen.has(o.id)),
+        ];
+
+        setOrders(merged);
         setLoading(false);
     };
 
@@ -84,20 +115,21 @@ export default function DashboardPage() {
     React.useEffect(() => {
         fetchDrivers();
 
-        // Check for any pending invoices that might have been missed
+        // Check for any pending invoices from the last 5 minutes that weren't processed
         const checkPendingInvoices = async () => {
+            const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
             const { data } = await supabase
                 .from('invoice_events')
                 .select('*')
                 .eq('status', 'PENDING')
+                .gte('created_at', fiveMinAgo)
                 .order('created_at', { ascending: false })
                 .limit(1)
                 .single();
 
             if (data) {
                 console.log("Found pending invoice on load:", data);
-                setInvoiceEvent(data as InvoiceEvent);
-                setIsInvoiceModalOpen(true);
+                openInvoiceWithWaitRef.current(data as InvoiceEvent);
                 toast.info("Factura pendiente detectada.");
             }
         };
@@ -131,12 +163,11 @@ export default function DashboardPage() {
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'invoice_events', filter: 'status=eq.PENDING' }, (payload) => {
                 console.log('🖨️ New Invoice Event Detected:', payload.new);
                 const newEvent = payload.new as InvoiceEvent;
-                setInvoiceEvent(newEvent);
-                setIsInvoiceModalOpen(true);
-                // Optional: Play sound here
-                const audio = new Audio('/sounds/notification.mp3'); // Ensure this file exists or use a robust solution
+                // Use the ref so we always call the latest version (avoids stale closures)
+                openInvoiceWithWaitRef.current(newEvent);
+                const audio = new Audio('/sounds/notification.mp3');
                 audio.play().catch(e => console.log('Audio play failed', e));
-                toast.info("Nueva factura detectada!");
+                toast.info('Nueva factura detectada!');
             })
             .subscribe();
 
@@ -145,6 +176,9 @@ export default function DashboardPage() {
             supabase.removeChannel(invoiceChannel);
         };
     }, [selectedDate]);
+
+    // Keep the ref always up-to-date so Realtime subscription can call it without stale closures
+    // (real assignment happens AFTER openInvoiceWithWait is declared below)
 
     const updateStatus = async (id: string, newStatus: Order['status']) => {
         const { error } = await supabase.from('orders').update({ status: newStatus }).eq('id', id);
@@ -181,16 +215,112 @@ export default function DashboardPage() {
             .reduce((sum, order) => sum + (Number(order.total_value) || 0), 0)
     };
 
-    const handleInvoiceAccept = (event: InvoiceEvent) => {
+    /** 
+     * Opens the invoice modal with the patience window.
+     * If a first invoice is already open and waiting, treats incomming as the second invoice.
+     */
+    const openInvoiceWithWait = React.useCallback((newEvent: InvoiceEvent) => {
+        // Read from refs to avoid stale closure — always has the current value
+        if (isModalOpenRef.current && isWaitingRef.current) {
+            // Clear the timer - we got what we were waiting for!
+            if (waitTimerRef.current) clearTimeout(waitTimerRef.current);
+            if (waitIntervalRef.current) clearInterval(waitIntervalRef.current);
+            setSecondInvoiceEvent(newEvent);
+            setIsWaitingForSecond(false);
+            setWaitRemaining(0);
+            toast.success('✅ 2ª factura detectada automáticamente!');
+            return;
+        }
+
+        // First invoice: open modal + start patience window
+        setInvoiceEvent(newEvent);
+        setSecondInvoiceEvent(null);
+        setIsInvoiceModalOpen(true);
+        setIsWaitingForSecond(true);
+        setWaitRemaining(PATIENCE_MS);
+
+        // Countdown interval (updates every 100ms for smooth progress bar)
+        const startTime = Date.now();
+        waitIntervalRef.current = setInterval(() => {
+            const elapsed = Date.now() - startTime;
+            const remaining = Math.max(0, PATIENCE_MS - elapsed);
+            setWaitRemaining(remaining);
+            if (remaining === 0) {
+                if (waitIntervalRef.current) clearInterval(waitIntervalRef.current);
+            }
+        }, 100);
+
+        // Main timeout: stop waiting
+        waitTimerRef.current = setTimeout(() => {
+            setIsWaitingForSecond(false);
+            setWaitRemaining(0);
+            if (waitIntervalRef.current) clearInterval(waitIntervalRef.current);
+        }, PATIENCE_MS);
+    }, [isInvoiceModalOpen, isWaitingForSecond]);
+
+    // Keep refs in sync with state — MUST be after both state declarations and function definition
+    React.useEffect(() => { isModalOpenRef.current = isInvoiceModalOpen; }, [isInvoiceModalOpen]);
+    React.useEffect(() => { isWaitingRef.current = isWaitingForSecond; }, [isWaitingForSecond]);
+    React.useEffect(() => {
+        openInvoiceWithWaitRef.current = openInvoiceWithWait;
+    }, [openInvoiceWithWait]);
+
+    /** Manual: user says "hay otra factura" after the patience window closed */
+    const handleRequestSecond = React.useCallback(() => {
+        // Extend a new 3-second window
+        if (waitTimerRef.current) clearTimeout(waitTimerRef.current);
+        if (waitIntervalRef.current) clearInterval(waitIntervalRef.current);
+        const EXTENDED_MS = 3000;
+        setIsWaitingForSecond(true);
+        setWaitRemaining(EXTENDED_MS);
+        toast.info('⏳ Extendiendo espera 3s para capturar 2ª factura...');
+
+        const startTime = Date.now();
+        waitIntervalRef.current = setInterval(() => {
+            const elapsed = Date.now() - startTime;
+            const remaining = Math.max(0, EXTENDED_MS - elapsed);
+            setWaitRemaining(remaining);
+            if (remaining === 0 && waitIntervalRef.current) clearInterval(waitIntervalRef.current);
+        }, 100);
+
+        waitTimerRef.current = setTimeout(() => {
+            setIsWaitingForSecond(false);
+            setWaitRemaining(0);
+            if (waitIntervalRef.current) clearInterval(waitIntervalRef.current);
+        }, EXTENDED_MS);
+    }, []);
+
+    const handleInvoiceAccept = async (event: InvoiceEvent, second?: InvoiceEvent | null) => {
+        // Cleanup timers
+        if (waitTimerRef.current) clearTimeout(waitTimerRef.current);
+        if (waitIntervalRef.current) clearInterval(waitIntervalRef.current);
         setIsInvoiceModalOpen(false);
-        toast.info("Redirigiendo a nuevo pedido...");
-        router.push(`/nuevo-pedido?event_id=${event.id}`);
+        setIsWaitingForSecond(false);
+        setInvoiceEvent(null);
+        setSecondInvoiceEvent(null);
+
+        // Immediately mark as PROCESSING via client supabase (no server action — guaranteed to execute)
+        const idsToMark = [event.id, second?.id].filter(Boolean) as string[];
+        await supabase
+            .from('invoice_events')
+            .update({ status: 'PROCESSING' })
+            .in('id', idsToMark);
+
+        toast.info('Redirigiendo a nuevo pedido...');
+        const url = second
+            ? `/nuevo-pedido?event_id=${event.id}&event_id2=${second.id}`
+            : `/nuevo-pedido?event_id=${event.id}`;
+        router.push(url);
     };
 
     const handleInvoiceIgnore = async (id: string) => {
+        if (waitTimerRef.current) clearTimeout(waitTimerRef.current);
+        if (waitIntervalRef.current) clearInterval(waitIntervalRef.current);
         setIsInvoiceModalOpen(false);
-        await ignoreInvoiceEvent(id);
+        setIsWaitingForSecond(false);
         setInvoiceEvent(null);
+        setSecondInvoiceEvent(null);
+        await ignoreInvoiceEvent(id);
         toast.dismiss();
     };
 
@@ -205,7 +335,7 @@ export default function DashboardPage() {
             } else {
                 toast.error('Error al simular: ' + json.error);
             }
-        } catch (e) {
+        } catch {
             toast.error('Error de red al simular impresión');
         } finally {
             setIsSimulating(false);
@@ -226,9 +356,14 @@ export default function DashboardPage() {
             <InvoiceCaptureModal
                 isOpen={isInvoiceModalOpen}
                 data={invoiceEvent}
+                secondData={secondInvoiceEvent}
+                isWaitingForSecond={isWaitingForSecond}
+                waitRemaining={waitRemaining}
                 onClose={() => setIsInvoiceModalOpen(false)}
                 onAccept={handleInvoiceAccept}
                 onIgnore={handleInvoiceIgnore}
+                onRequestSecond={handleRequestSecond}
+                onSimulateSecond={handleSimulatePrint}
             />
 
             {/* Sticky Header Section */}

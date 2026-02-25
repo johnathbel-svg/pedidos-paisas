@@ -7,9 +7,10 @@ import { supabase } from "@/lib/supabase";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ClientSearch } from "@/components/ClientSearch";
 import { Client } from "@/types/order";
-import { processInvoiceEvent } from "@/app/actions/invoices"; // Import server action
 import { toast } from "sonner";
 import Link from "next/link";
+import { ConsolidateOrderBanner } from "@/components/orders/ConsolidateOrderBanner";
+import { consolidateOrder } from "@/app/actions/orders";
 
 const generateOrderId = () => `PED-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}A`;
 
@@ -37,11 +38,12 @@ function PedidosContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const eventId = searchParams.get('event_id');
+    const eventId2 = searchParams.get('event_id2'); // Second invoice event (optional)
 
     // 2. Core State
     const [orderId, setOrderId] = useState("");
     const [isSaving, setIsSaving] = useState(false);
-    const [isLoadingEvent, setIsLoadingEvent] = useState(!!eventId);
+    const [isLoadingEvent, setIsLoadingEvent] = useState(!!(eventId || eventId2));
 
     // 3. Form Configuration
     const [deliveryType, setDeliveryType] = useState<"DOMICILIO" | "TIENDA">("DOMICILIO");
@@ -61,29 +63,57 @@ function PedidosContent() {
     const [deliveryAddress, setDeliveryAddress] = useState("");
     const [observations, setObservations] = useState("");
 
-    // 6. Helpers
-    const loadInvoiceEvent = async (id: string) => {
-        setIsLoadingEvent(true);
-        const { data, error } = await supabase
-            .from('invoice_events')
-            .select('*')
-            .eq('id', id)
-            .single();
+    // 6. Consolidation state
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [existingOrder, setExistingOrder] = useState<any | null>(null);
+    const [isConsolidating, setIsConsolidating] = useState(false);
+    const [consolidationDismissed, setConsolidationDismissed] = useState(false);
 
-        if (error) {
-            console.error("Error loading event:", error);
-            toast.error("No se pudo cargar la información de la factura.");
-        } else if (data) {
-            setInv1Code(data.invoice_number_1 || "");
-            setInv1Value(data.invoice_value_1?.toString() || "");
-            setInv2Code(data.invoice_number_2 || "");
-            setInv2Value(data.invoice_value_2?.toString() || "");
-            if (data.products && Array.isArray(data.products)) {
-                setProducts(data.products);
+    // 6. Helpers
+    const loadInvoiceEvent = async (id: string, id2?: string | null) => {
+        setIsLoadingEvent(true);
+        try {
+            // Fetch both events concurrently
+            const queries = [id, id2].filter(Boolean).map(eid =>
+                supabase.from('invoice_events').select('*').eq('id', eid!).single()
+            );
+            const results = await Promise.all(queries);
+
+            const event1 = results[0]?.data;
+            const event2 = results[1]?.data ?? null;
+
+            if (!event1) {
+                toast.error("No se pudo cargar la información de la factura.");
+                return;
             }
-            toast.success("Datos pre-cargados correctamente.");
+
+            // Populate Invoice 1 always from event1.invoice_number_1
+            setInv1Code(event1.invoice_number_1 || "");
+            setInv1Value(event1.invoice_value_1?.toString() || "");
+
+            if (event2) {
+                // Two separate events → inv2 comes from event2
+                setInv2Code(event2.invoice_number_1 || "");
+                setInv2Value(event2.invoice_value_1?.toString() || "");
+            } else {
+                // Single event with both invoices embedded
+                setInv2Code(event1.invoice_number_2 || "");
+                setInv2Value(event1.invoice_value_2?.toString() || "");
+            }
+
+            // Merge products from both events
+            const products1 = Array.isArray(event1.products) ? event1.products : [];
+            const products2 = event2 && Array.isArray(event2.products) ? event2.products : [];
+            const merged = [...products1, ...products2];
+            if (merged.length > 0) setProducts(merged);
+
+            toast.success(event2 ? "2 facturas pre-cargadas correctamente." : "Datos pre-cargados correctamente.");
+        } catch (err) {
+            console.error("Error loading event:", err);
+            toast.error("Error al cargar datos de la factura.");
+        } finally {
+            setIsLoadingEvent(false);
         }
-        setIsLoadingEvent(false);
     };
 
     // 7. Effects
@@ -94,9 +124,9 @@ function PedidosContent() {
 
     useEffect(() => {
         if (eventId) {
-            loadInvoiceEvent(eventId);
+            loadInvoiceEvent(eventId, eventId2);
         }
-    }, [eventId]);
+    }, [eventId, eventId2]);
 
     const totalValue = React.useMemo(() => {
         // Prefer sum of products if available and matches invoices?
@@ -123,6 +153,87 @@ function PedidosContent() {
             setObservations("");
             setDeliveryType("DOMICILIO");
         }
+    };
+
+    /**
+     * When a client is selected from the CRM, check for any active (non-delivered)
+     * orders for that client. If found, surface the consolidation banner.
+     */
+    const handleClientSelect = async (client: Client) => {
+        setSelectedClient(client);
+        setClientName(client.full_name);
+        if (client.address) setDeliveryAddress(client.address);
+
+        // Reset consolidation state
+        setExistingOrder(null);
+        setConsolidationDismissed(false);
+
+        if (!client.id) return; // Anonymous client, skip check
+
+        const { data } = await supabase
+            .from('orders')
+            .select('id, public_id, status, invoices_data, client_name')
+            .eq('client_id', client.id)
+            .not('status', 'in', '("ENTREGADO","CANCELADO")')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (data) {
+            setExistingOrder(data);
+        }
+    };
+
+    /**
+     * User chose to merge the current invoices into the existing order.
+     */
+    const handleConsolidate = async () => {
+        if (!existingOrder) return;
+        setIsConsolidating(true);
+
+        const newInvoices = [
+            { code: inv1Code, value: inv1Value },
+            { code: inv2Code, value: inv2Value },
+        ].filter(inv => inv.code || inv.value);
+
+        let finalObs = observations;
+        if (deliveryType === 'DOMICILIO' && deliveryAddress) {
+            finalObs = `[ENTREGA EN: ${deliveryAddress}] ${finalObs}`.trim();
+        }
+
+        const result = await consolidateOrder({
+            existingOrderId: existingOrder.id,
+            newInvoices,
+            newProducts: products,
+            newObservations: finalObs || undefined,
+        });
+
+        if (!result.success) {
+            toast.error(`Error al consolidar: ${result.error}`);
+            setIsConsolidating(false);
+            return;
+        }
+
+        // Mark invoice events as PROCESSED
+        if (eventId || eventId2) {
+            const ids = [eventId, eventId2].filter(Boolean) as string[];
+            await supabase.from('invoice_events').update({ status: 'PROCESSED' }).in('id', ids);
+        }
+
+        setIsConsolidating(false);
+        if (result.capped) {
+            toast.warning(`Pedido actualizado. Solo se agregaron ${result.addedCount} facturas (límite de 4 alcanzado).`);
+        } else {
+            toast.success(`✅ Facturas agregadas al pedido ${existingOrder.public_id}. Total: ${result.totalInvoices} factura(s).`);
+        }
+
+        setTimeout(() => router.push('/pedidos'), 1200);
+    };
+
+    /** User chose to create a separate new order — dismiss banner and continue normally. */
+    const handleConsolidationDismiss = () => {
+        setExistingOrder(null);
+        setConsolidationDismissed(true);
     };
 
     const handleSaveOrder = async () => {
@@ -163,9 +274,18 @@ function PedidosContent() {
             return;
         }
 
-        // 2. Mark event as processed (if exists)
-        if (eventId && orderData) {
-            await processInvoiceEvent(eventId, orderData.id);
+        // 2. Mark invoice events as PROCESSED (both if two were captured)
+        if (orderData) {
+            const eventIds = [eventId, eventId2].filter(Boolean) as string[];
+            if (eventIds.length > 0) {
+                const { error: evtError } = await supabase
+                    .from('invoice_events')
+                    .update({ status: 'PROCESSED' })
+                    .in('id', eventIds);
+                if (evtError) {
+                    console.warn('Could not mark invoice events as processed:', evtError.message);
+                }
+            }
         }
 
         setIsSaving(false);
@@ -174,18 +294,9 @@ function PedidosContent() {
         // Auto-print receipt
         setTimeout(() => {
             window.print();
-            // Redirect after print dialog triggers
-            // Note: print() blocks on some browsers, so we can't reliably redirect immediately after without user interaction sometimes.
-            // But usually this works.
         }, 100);
 
-        // Give time for print dialog to open before redirecting
-        // Or wait for focus return? 
-        // Simple approach: Redirect after loop.
-        // Actually, if we redirect, print might cancel. Better to stay and let user go back?
-        // User flow: "Justo despues... se debe imprimir".
-        // Use a longer timeout or rely on user.
-        // Let's redirect after 2s which is usually enough to queue print.
+        // Redirect after print dialog has time to open
         setTimeout(() => {
             router.push("/pedidos");
         }, 1500);
@@ -201,7 +312,7 @@ function PedidosContent() {
     }
 
     return (
-        <div className="grid gap-8 lg:grid-cols-12 max-w-6xl mx-auto py-6 px-4 md:px-0">
+        <div data-form className="grid gap-8 lg:grid-cols-12 max-w-6xl mx-auto py-6 px-4 md:px-0">
             {/* Header */}
             <div className="lg:col-span-12 flex items-center justify-between border-b pb-4">
                 <div className="flex items-center gap-4">
@@ -387,16 +498,25 @@ function PedidosContent() {
                                 </div>
                             ) : (
                                 <ClientSearch
-                                    onSelect={(client) => {
-                                        setSelectedClient(client);
-                                        setClientName(client.full_name);
-                                        if (client.address) {
-                                            setDeliveryAddress(client.address);
-                                        }
-                                    }}
+                                    onSelect={handleClientSelect}
+                                    className="[&_input]:tabindex-1"
                                 />
                             )}
                         </div>
+
+                        {/* Consolidation Banner — shown when active order exists for this client */}
+                        {existingOrder && !consolidationDismissed && (
+                            <ConsolidateOrderBanner
+                                existingOrder={existingOrder}
+                                newInvoices={[
+                                    { code: inv1Code, value: inv1Value },
+                                    { code: inv2Code, value: inv2Value },
+                                ].filter(inv => inv.code || inv.value)}
+                                onConsolidate={handleConsolidate}
+                                onCreateNew={handleConsolidationDismiss}
+                                isLoading={isConsolidating}
+                            />
+                        )}
 
                         {/* Address Input (Contextual) */}
                         {deliveryType === 'DOMICILIO' && (
@@ -405,6 +525,7 @@ function PedidosContent() {
                                     <MapPin className="h-3 w-3" /> Dirección de Entrega
                                 </label>
                                 <input
+                                    tabIndex={2}
                                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand uppercase placeholder:normal-case font-medium"
                                     value={deliveryAddress}
                                     onChange={(e) => setDeliveryAddress(e.target.value.toUpperCase())}
@@ -417,6 +538,7 @@ function PedidosContent() {
                         <div className="space-y-2">
                             <label className="text-xs font-bold uppercase text-muted-foreground">Observaciones</label>
                             <textarea
+                                tabIndex={3}
                                 className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand uppercase placeholder:normal-case resize-none"
                                 value={observations}
                                 onChange={(e) => setObservations(e.target.value.toUpperCase())}
@@ -433,6 +555,7 @@ function PedidosContent() {
                         </div>
 
                         <button
+                            tabIndex={4}
                             onClick={handleSaveOrder}
                             disabled={isSaving}
                             className="w-full inline-flex items-center justify-center whitespace-nowrap rounded-md text-base font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-brand text-black hover:bg-brand/90 hover:scale-105 active:scale-95 h-12 px-8 shadow-lg shadow-brand/20"

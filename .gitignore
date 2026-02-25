@@ -39,3 +39,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Firebird database files (large binary files - do NOT commit)
+*.fdb
+*.FDB
+*.fbk
+*.gdb
+BK Paisas/
+
+# Test/temp scripts
+scripts/prueba.txt
